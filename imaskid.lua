@@ -412,29 +412,59 @@ local function setFullbright(on)
 end
 
 -- 4) Player ESP (game-specific: in a game where everyone is hacking,
---    seeing where everyone is through walls is the most useful edge)
+--    seeing where everyone is through walls is the most useful edge) Player ESP with names + HP
 local espEnabled = false
-local espHighlights = {}
+local espObjects = {}
 
 local function removeESP(plr)
-	if espHighlights[plr] then
-		espHighlights[plr]:Destroy()
-		espHighlights[plr] = nil
+	local data = espObjects[plr]
+	if data then
+		data.highlight:Destroy()
+		data.billboard:Destroy()
+		espObjects[plr] = nil
 	end
 end
 
 local function addESP(plr)
 	if plr == player or not espEnabled then return end
 	removeESP(plr)
+
 	local character = plr.Character
 	if not character then return end
-	local h = Instance.new("Highlight")
-	h.FillColor = ACCENT
-	h.FillTransparency = 0.75
-	h.OutlineColor = ACCENT
-	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	h.Parent = character
-	espHighlights[plr] = h
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local head = character:FindFirstChild("Head")
+	if not humanoid or not head then return end
+
+	local highlight = Instance.new("Highlight")
+	highlight.FillColor = ACCENT
+	highlight.FillTransparency = 0.75
+	highlight.OutlineColor = ACCENT
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = character
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Adornee = head
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(140, 34)
+	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.Parent = head
+
+	local tag = Instance.new("TextLabel")
+	tag.BackgroundTransparency = 1
+	tag.Size = UDim2.fromScale(1, 1)
+	tag.Font = Enum.Font.Code
+	tag.TextSize = 14
+	tag.TextColor3 = ACCENT
+	tag.TextStrokeTransparency = 0.5
+	tag.Text = ""
+	tag.Parent = billboard
+
+	espObjects[plr] = {
+		highlight = highlight,
+		billboard = billboard,
+		label = tag,
+		humanoid = humanoid,
+	}
 end
 
 local function hookPlayer(plr)
@@ -449,13 +479,26 @@ for _, plr in ipairs(Players:GetPlayers()) do hookPlayer(plr) end
 connect(Players.PlayerAdded, hookPlayer)
 connect(Players.PlayerRemoving, removeESP)
 
+-- Keeps the name/HP text up to date (colour fades from red to green with health)
+connect(RunService.Heartbeat, function()
+	if not espEnabled then return end
+	for plr, data in pairs(espObjects) do
+		local hum = data.humanoid
+		if hum and hum.Parent then
+			local hp = math.max(0, math.floor(hum.Health + 0.5))
+			local ratio = hum.MaxHealth > 0 and math.clamp(hum.Health / hum.MaxHealth, 0, 1) or 0
+			data.label.Text = plr.DisplayName .. "\n" .. hp .. " HP"
+			data.label.TextColor3 = DANGER:Lerp(ACCENT, ratio)
+		end
+	end
+end)
+
 local function setESP(on)
 	espEnabled = on
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if on then addESP(plr) else removeESP(plr) end
 	end
 end
-
 -- Add the checkboxes (row number, then what happens)
 makeCheckbox("Infinite Jump", 1, function(on) infiniteJump = on end)
 makeCheckbox("Noclip", 2, setNoclip)
