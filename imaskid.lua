@@ -120,13 +120,21 @@ gui.IgnoreGuiInset = true
 gui.DisplayOrder = 100
 gui.Parent = playerGui
 
--- separate layer for ESP tracers (sits under the menu)
+-- separate layer for ESP tracers and the radar (sits under the menu)
 local tracerGui = Instance.new("ScreenGui")
-tracerGui.Name = "HackGuiTracers"
+tracerGui.Name = "HackGuiOverlay"
 tracerGui.ResetOnSpawn = false
 tracerGui.IgnoreGuiInset = true
 tracerGui.DisplayOrder = 99
 tracerGui.Parent = playerGui
+
+-- notifications sit above everything
+local notifyGui = Instance.new("ScreenGui")
+notifyGui.Name = "HackGuiNotifications"
+notifyGui.ResetOnSpawn = false
+notifyGui.IgnoreGuiInset = true
+notifyGui.DisplayOrder = 101
+notifyGui.Parent = playerGui
 
 local main = Instance.new("Frame")
 main.Name = "Main"
@@ -177,7 +185,7 @@ local title = label(titleBar, "HACK.EXE", 14, TEXT, FONT_BOLD)
 title.Position = UDim2.fromOffset(36, 0)
 title.Size = UDim2.new(0, 100, 1, 0)
 
-local version = label(titleBar, "v1.2", 11, MUTED, FONT_MONO)
+local version = label(titleBar, "v1.3", 11, MUTED, FONT_MONO)
 version.Position = UDim2.fromOffset(112, 1)
 version.Size = UDim2.new(0, 50, 1, 0)
 
@@ -301,7 +309,7 @@ footer.Position = UDim2.new(0, 0, 1, -28)
 footer.Size = UDim2.new(1, 0, 0, 20)
 
 -- ============================================================
--- LOG (a little terminal that prints what you switch on/off)
+-- LOG (a little terminal that prints what happens)
 -- ============================================================
 local logLines = {}
 local logCount = 0
@@ -320,6 +328,88 @@ local function log(text, color)
 	task.defer(function()
 		if logPage.Parent then logPage.CanvasPosition = Vector2.new(0, 1e6) end
 	end)
+end
+
+-- ============================================================
+-- NOTIFICATIONS (toasts in the bottom-right corner)
+-- notify("text", color) -> writes to the LOG and pops a toast
+-- ============================================================
+local notificationsEnabled = true
+
+local toastHolder = Instance.new("Frame")
+toastHolder.AnchorPoint = Vector2.new(1, 1)
+toastHolder.Position = UDim2.new(1, -20, 1, -20)
+toastHolder.Size = UDim2.fromOffset(260, 400)
+toastHolder.BackgroundTransparency = 1
+toastHolder.Parent = notifyGui
+
+local toastLayout = Instance.new("UIListLayout")
+toastLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+toastLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+toastLayout.Padding = UDim.new(0, 6)
+toastLayout.SortOrder = Enum.SortOrder.LayoutOrder
+toastLayout.Parent = toastHolder
+
+local activeToasts = {}
+local toastOrder = 0
+
+local function toast(text, color)
+	toastOrder += 1
+
+	local wrapper = Instance.new("Frame")
+	wrapper.LayoutOrder = toastOrder
+	wrapper.Size = UDim2.new(1, 0, 0, 38)
+	wrapper.BackgroundTransparency = 1
+	wrapper.Parent = toastHolder
+
+	local card = Instance.new("Frame")
+	card.Size = UDim2.fromScale(1, 1)
+	card.Position = UDim2.new(1, 280, 0, 0) -- starts off-screen to the right
+	card.BackgroundColor3 = PANEL
+	card.BorderSizePixel = 0
+	card.Parent = wrapper
+	corner(card, 9)
+	stroke(card, color, 0.6, 1)
+
+	local dotMark = Instance.new("Frame")
+	dotMark.AnchorPoint = Vector2.new(0, 0.5)
+	dotMark.Position = UDim2.new(0, 14, 0.5, 0)
+	dotMark.Size = UDim2.fromOffset(8, 8)
+	dotMark.BackgroundColor3 = color
+	dotMark.BorderSizePixel = 0
+	dotMark.Parent = card
+	corner(dotMark, 4)
+
+	local text_ = label(card, text, 13, TEXT, FONT)
+	text_.Position = UDim2.fromOffset(32, 0)
+	text_.Size = UDim2.new(1, -42, 1, 0)
+	text_.TextTruncate = Enum.TextTruncate.AtEnd
+
+	tween(card, 0.25, { Position = UDim2.new(0, 0, 0, 0) })
+
+	table.insert(activeToasts, wrapper)
+	if #activeToasts > 5 then
+		table.remove(activeToasts, 1):Destroy()
+	end
+
+	task.delay(2.6, function()
+		if not card.Parent then return end
+		local out = tween(card, 0.25, { Position = UDim2.new(1, 280, 0, 0) })
+		out.Completed:Once(function()
+			if not wrapper.Parent then return end
+			local shrink = tween(wrapper, 0.15, { Size = UDim2.new(1, 0, 0, 0) })
+			shrink.Completed:Once(function()
+				local i = table.find(activeToasts, wrapper)
+				if i then table.remove(activeToasts, i) end
+				wrapper:Destroy()
+			end)
+		end)
+	end)
+end
+
+local function notify(text, color)
+	log(text, color)
+	if notificationsEnabled then toast(text, color or ACCENT) end
 end
 
 -- ============================================================
@@ -466,10 +556,125 @@ end
 
 local disableCallbacks = {} -- used on unload to switch everything off
 
--- makeCheckbox(page, order, "Name", "description", callback(enabled), startsOn)
+-- ------------------------------------------------------------
+-- Keybind chips: the small [BIND] button on every top-level toggle
+-- Click it, press a key to bind. Escape cancels, Backspace clears.
+-- ------------------------------------------------------------
+local listeningForKey = false
+local moduleBinds = {}
+
+local KEY_SHORT = {
+	LeftControl = "LCtrl", RightControl = "RCtrl",
+	LeftShift = "LShift", RightShift = "RShift",
+	LeftAlt = "LAlt", RightAlt = "RAlt",
+	Backquote = "`", Return = "Enter", Backspace = "Bksp",
+	LeftBracket = "[", RightBracket = "]", Semicolon = ";",
+	Quote = "'", Comma = ",", Period = ".", Slash = "/",
+	BackSlash = "\\", Minus = "-", Equals = "=",
+}
+local function shortKey(key)
+	return KEY_SHORT[key.Name] or key.Name
+end
+
+local function makeBindChip(parent, name, toggleFn)
+	local bind = { key = nil, toggle = toggleFn }
+	table.insert(moduleBinds, bind)
+	local waiting = false
+
+	local btn = Instance.new("TextButton")
+	btn.AnchorPoint = Vector2.new(1, 0.5)
+	btn.Position = UDim2.new(1, -44, 0.5, 0)
+	btn.Size = UDim2.fromOffset(54, 22)
+	btn.BackgroundColor3 = BG
+	btn.AutoButtonColor = false
+	btn.Font = FONT_MONO
+	btn.TextSize = 11
+	btn.Text = "BIND"
+	btn.TextColor3 = MUTED
+	btn.ZIndex = 3
+	btn.Parent = parent
+	corner(btn, 6)
+	local btnStroke = stroke(btn, MUTED, 0.5, 1)
+
+	local function refresh()
+		if waiting then
+			btn.Text = "..."
+			btn.TextColor3 = ACCENT
+			btnStroke.Color = ACCENT
+			btnStroke.Transparency = 0
+		elseif bind.key then
+			btn.Text = shortKey(bind.key)
+			btn.TextColor3 = TEXT
+			btnStroke.Color = MUTED
+			btnStroke.Transparency = 0.2
+		else
+			btn.Text = "BIND"
+			btn.TextColor3 = MUTED
+			btnStroke.Color = MUTED
+			btnStroke.Transparency = 0.5
+		end
+	end
+	bind.refresh = refresh
+
+	local function finish()
+		waiting = false
+		refresh()
+		task.defer(function() listeningForKey = false end) -- after every other handler has seen this key press
+	end
+
+	connect(btn.MouseButton1Click, function()
+		if listeningForKey then return end
+		waiting = true
+		listeningForKey = true
+		refresh()
+	end)
+
+	connect(UserInputService.InputBegan, function(input)
+		if not waiting then return end
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		if input.KeyCode == Enum.KeyCode.Unknown then return end
+
+		if input.KeyCode == Enum.KeyCode.Escape then
+			-- cancel, keep the old key
+		elseif input.KeyCode == Enum.KeyCode.Backspace then
+			bind.key = nil
+			log(name .. " keybind cleared", MUTED)
+		elseif input.KeyCode == TOGGLE_KEY then
+			log(TOGGLE_KEY.Name .. " is reserved for the menu", DANGER)
+		else
+			-- a key can only toggle one thing, so take it away from anything else using it
+			for _, other in ipairs(moduleBinds) do
+				if other ~= bind and other.key == input.KeyCode then
+					other.key = nil
+					other.refresh()
+				end
+			end
+			bind.key = input.KeyCode
+			log(name .. " bound to " .. bind.key.Name)
+		end
+		finish()
+	end)
+end
+
+-- pressing a bound key toggles its module (works even when the menu is closed)
+connect(UserInputService.InputBegan, function(input)
+	if listeningForKey then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	if UserInputService:GetFocusedTextBox() then return end
+	for _, b in ipairs(moduleBinds) do
+		if b.key and b.key == input.KeyCode then
+			b.toggle()
+		end
+	end
+end)
+
+-- makeCheckbox(page, order, "Name", "description", callback(enabled), startsOn, noBind)
+-- Top-level checkboxes get a keybind chip automatically (not ones inside a module body)
 -- Returns: set(value), row
-local function makeCheckbox(page, order, name, desc, callback, startsOn)
+local function makeCheckbox(page, order, name, desc, callback, startsOn, noBind)
 	local cardBg, hoverBg, insetBg = styleFor(page)
+	local nested = page:GetAttribute("Nested")
+	local showChip = not nested and not noBind
 	local checked = false
 
 	local row = Instance.new("TextButton")
@@ -482,13 +687,17 @@ local function makeCheckbox(page, order, name, desc, callback, startsOn)
 	row.Parent = page
 	corner(row, 9)
 
+	local textWidth = showChip and -110 or -60
+
 	local nameLabel = label(row, name, 13, TEXT, FONT)
 	nameLabel.Position = UDim2.fromOffset(14, 7)
-	nameLabel.Size = UDim2.new(1, -60, 0, 18)
+	nameLabel.Size = UDim2.new(1, textWidth, 0, 18)
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local descLabel = label(row, desc, 11, MUTED, FONT)
 	descLabel.Position = UDim2.fromOffset(14, 24)
-	descLabel.Size = UDim2.new(1, -60, 0, 16)
+	descLabel.Size = UDim2.new(1, textWidth, 0, 16)
+	descLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local box = Instance.new("Frame")
 	box.AnchorPoint = Vector2.new(1, 0.5)
@@ -519,12 +728,16 @@ local function makeCheckbox(page, order, name, desc, callback, startsOn)
 		tween(tick, 0.15, { Size = checked and UDim2.fromOffset(12, 12) or UDim2.fromOffset(0, 0) })
 		tween(boxStroke, 0.15, { Color = checked and ACCENT or MUTED })
 		callback(checked)
-		if not silent then log(name .. (checked and " enabled" or " disabled"), checked and ACCENT or MUTED) end
+		if not silent then notify(name .. (checked and " enabled" or " disabled"), checked and ACCENT or MUTED) end
 	end
 
 	connect(row.MouseEnter, function() tween(row, 0.12, { BackgroundColor3 = hoverBg }) end)
 	connect(row.MouseLeave, function() tween(row, 0.12, { BackgroundColor3 = cardBg }) end)
 	connect(row.MouseButton1Click, function() set(not checked) end)
+
+	if showChip then
+		makeBindChip(row, name, function() set(not checked) end)
+	end
 
 	table.insert(disableCallbacks, function()
 		if checked then callback(false) end
@@ -554,6 +767,7 @@ local function makeButton(page, order, name, desc, btnText, callback)
 	local descLabel = label(row, desc, 11, MUTED, FONT)
 	descLabel.Position = UDim2.fromOffset(14, 24)
 	descLabel.Size = UDim2.new(1, -120, 0, 16)
+	descLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local btn = Instance.new("TextButton")
 	btn.AnchorPoint = Vector2.new(1, 0.5)
@@ -581,9 +795,7 @@ local function makeButton(page, order, name, desc, btnText, callback)
 end
 
 -- makeKeybind(page, order, "Name", "description", Enum.KeyCode.T, function(newKey) end)
--- Click the button, then press any key to bind it (Escape cancels)
-local listeningForKey = false
-
+-- A full row with a key button, for settings like Click TP's hold-key
 local function makeKeybind(page, order, name, desc, default, onChange)
 	local cardBg, _, insetBg = styleFor(page)
 	local key = default
@@ -604,6 +816,7 @@ local function makeKeybind(page, order, name, desc, default, onChange)
 	local descLabel = label(row, desc, 11, MUTED, FONT)
 	descLabel.Position = UDim2.fromOffset(14, 24)
 	descLabel.Size = UDim2.new(1, -120, 0, 16)
+	descLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local btn = Instance.new("TextButton")
 	btn.AnchorPoint = Vector2.new(1, 0.5)
@@ -624,7 +837,7 @@ local function makeKeybind(page, order, name, desc, default, onChange)
 		btn.Text = key.Name
 		btn.TextColor3 = TEXT
 		btnStroke.Color = MUTED
-		task.defer(function() listeningForKey = false end) -- after every other handler has seen this key press
+		task.defer(function() listeningForKey = false end)
 	end
 
 	connect(btn.MouseButton1Click, function()
@@ -654,6 +867,7 @@ end
 -- makeModule(page, order, "Name", "description", callback(enabled), hasToggle)
 -- A dropdown: click the arrow/title to expand, tick the box to turn it on.
 -- Ticking it auto-expands the settings, unticking collapses them.
+-- Toggle modules also get a keybind chip.
 -- Put your settings inside module.body with the other make* functions:
 --   local m = makeModule(page, 1, "Thing", "does a thing", function(on) end)
 --   makeSlider(m.body, 1, "Amount", 1, 10, 5, function(v) end, true)
@@ -685,13 +899,17 @@ local function makeModule(page, order, name, desc, callback, hasToggle)
 	chevron.Position = UDim2.fromOffset(20, HEADER_H / 2)
 	chevron.Size = UDim2.fromOffset(18, 24)
 
+	local textWidth = hasToggle and -148 or -50
+
 	local nameLabel = label(header, name, 13, TEXT, FONT)
 	nameLabel.Position = UDim2.fromOffset(38, 7)
-	nameLabel.Size = UDim2.new(1, hasToggle and -96 or -50, 0, 18)
+	nameLabel.Size = UDim2.new(1, textWidth, 0, 18)
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local descLabel = label(header, desc, 11, MUTED, FONT)
 	descLabel.Position = UDim2.fromOffset(38, 24)
-	descLabel.Size = UDim2.new(1, hasToggle and -96 or -50, 0, 16)
+	descLabel.Size = UDim2.new(1, textWidth, 0, 16)
+	descLabel.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local body = Instance.new("Frame")
 	body.BackgroundTransparency = 1
@@ -786,12 +1004,14 @@ local function makeModule(page, order, name, desc, callback, hasToggle)
 			tween(boxStroke, 0.15, { Color = checked and ACCENT or MUTED })
 			setExpanded(value)
 			callback(checked)
-			if not silent then log(name .. (checked and " enabled" or " disabled"), checked and ACCENT or MUTED) end
+			if not silent then notify(name .. (checked and " enabled" or " disabled"), checked and ACCENT or MUTED) end
 		end
 
 		connect(hit.MouseButton1Click, function() set(not checked) end)
 		connect(hit.MouseEnter, function() tween(wrapper, 0.12, { BackgroundColor3 = ELEMENT_HOVER }) end)
 		connect(hit.MouseLeave, function() tween(wrapper, 0.12, { BackgroundColor3 = ELEMENT }) end)
+
+		makeBindChip(wrapper, name, function() set(not checked) end)
 
 		table.insert(disableCallbacks, function()
 			if checked then callback(false) end
@@ -900,7 +1120,6 @@ end)
 local originalLighting = {
 	Brightness = Lighting.Brightness,
 	ClockTime = Lighting.ClockTime,
-	FogEnd = Lighting.FogEnd,
 	GlobalShadows = Lighting.GlobalShadows,
 	Ambient = Lighting.Ambient,
 }
@@ -908,7 +1127,6 @@ local function setFullbright(on)
 	if on then
 		Lighting.Brightness = 2
 		Lighting.ClockTime = 14
-		Lighting.FogEnd = 1e6
 		Lighting.GlobalShadows = false
 		Lighting.Ambient = Color3.fromRGB(178, 178, 178)
 	else
@@ -916,6 +1134,29 @@ local function setFullbright(on)
 			Lighting[prop] = value
 		end
 	end
+end
+
+-- Remove Fog (a one-shot button; unloading the menu puts the fog back)
+local fogBackup = nil
+local function removeFog()
+	if not fogBackup then
+		local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+		fogBackup = {
+			FogStart = Lighting.FogStart,
+			FogEnd = Lighting.FogEnd,
+			atmosphere = atmosphere,
+			Density = atmosphere and atmosphere.Density,
+			Haze = atmosphere and atmosphere.Haze,
+		}
+	end
+	Lighting.FogStart = 900000
+	Lighting.FogEnd = 1000000
+	local atmosphere = fogBackup.atmosphere
+	if atmosphere and atmosphere.Parent then
+		atmosphere.Density = 0
+		atmosphere.Haze = 0
+	end
+	notify("Fog removed")
 end
 
 -- Player ESP (options: names, HP, distance, outline, fill, tracers)
@@ -1058,18 +1299,129 @@ local function setESP(on)
 	end
 end
 
--- ESP dropdown (the menu part)
-local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
-makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
-makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
-makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
-makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
-makeCheckbox(espModule.body, 5, "Fill", "Semi-transparent fill inside the outline", function(on) espOpts.fill = on end)
-makeCheckbox(espModule.body, 6, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)local function setESP(on)
-	espEnabled = on
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if on then addESP(plr) else removeESP(plr) end
+-- Radar (round minimap in the bottom-left; up = the way your camera faces)
+local radar = { enabled = false, range = 200, size = 150, dots = {} }
+
+local radarFrame = Instance.new("Frame")
+radarFrame.AnchorPoint = Vector2.new(0, 1)
+radarFrame.Position = UDim2.new(0, 20, 1, -20)
+radarFrame.Size = UDim2.fromOffset(radar.size, radar.size)
+radarFrame.BackgroundColor3 = BG
+radarFrame.BackgroundTransparency = 0.2
+radarFrame.BorderSizePixel = 0
+radarFrame.Visible = false
+radarFrame.Parent = tracerGui
+corner(radarFrame, 999)
+local radarStroke = stroke(radarFrame, ACCENT, 0.4, 1.5)
+
+local radarRing = Instance.new("Frame")
+radarRing.AnchorPoint = Vector2.new(0.5, 0.5)
+radarRing.Position = UDim2.fromScale(0.5, 0.5)
+radarRing.Size = UDim2.fromScale(0.5, 0.5)
+radarRing.BackgroundTransparency = 1
+radarRing.Parent = radarFrame
+corner(radarRing, 999)
+local radarRingStroke = stroke(radarRing, ACCENT, 0.85, 1)
+
+local radarH = Instance.new("Frame")
+radarH.AnchorPoint = Vector2.new(0.5, 0.5)
+radarH.Position = UDim2.fromScale(0.5, 0.5)
+radarH.Size = UDim2.new(1, 0, 0, 1)
+radarH.BackgroundColor3 = ACCENT
+radarH.BackgroundTransparency = 0.85
+radarH.BorderSizePixel = 0
+radarH.Parent = radarFrame
+
+local radarV = Instance.new("Frame")
+radarV.AnchorPoint = Vector2.new(0.5, 0.5)
+radarV.Position = UDim2.fromScale(0.5, 0.5)
+radarV.Size = UDim2.new(0, 1, 1, 0)
+radarV.BackgroundColor3 = ACCENT
+radarV.BackgroundTransparency = 0.85
+radarV.BorderSizePixel = 0
+radarV.Parent = radarFrame
+
+local radarSelf = Instance.new("Frame") -- you
+radarSelf.AnchorPoint = Vector2.new(0.5, 0.5)
+radarSelf.Position = UDim2.fromScale(0.5, 0.5)
+radarSelf.Size = UDim2.fromOffset(6, 6)
+radarSelf.BackgroundColor3 = TEXT
+radarSelf.BorderSizePixel = 0
+radarSelf.Parent = radarFrame
+corner(radarSelf, 3)
+
+onAccent(function(c)
+	radarStroke.Color = c
+	radarRingStroke.Color = c
+	radarH.BackgroundColor3 = c
+	radarV.BackgroundColor3 = c
+	for _, d in pairs(radar.dots) do d.BackgroundColor3 = c end
+end)
+
+local function getRadarDot(plr)
+	local d = radar.dots[plr]
+	if not d then
+		d = Instance.new("Frame")
+		d.AnchorPoint = Vector2.new(0.5, 0.5)
+		d.Size = UDim2.fromOffset(7, 7)
+		d.BackgroundColor3 = ACCENT
+		d.BorderSizePixel = 0
+		d.Visible = false
+		d.Parent = radarFrame
+		corner(d, 4)
+		radar.dots[plr] = d
 	end
+	return d
+end
+
+connect(Players.PlayerRemoving, function(plr)
+	if radar.dots[plr] then
+		radar.dots[plr]:Destroy()
+		radar.dots[plr] = nil
+	end
+end)
+
+connect(RunService.RenderStepped, function()
+	if not radar.enabled then return end
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+	local cf = camera.CFrame
+	local look = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+	if look.Magnitude < 0.01 then look = Vector3.new(cf.UpVector.X, 0, cf.UpVector.Z) end -- looking straight down
+	if look.Magnitude < 0.01 then return end
+	look = look.Unit
+	local right = Vector3.new(-look.Z, 0, look.X)
+
+	local radius = radar.size / 2 - 8
+	local pixelsPerStud = radius / radar.range
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then
+			local d = getRadarDot(plr)
+			local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+			if myRoot and root then
+				local off = root.Position - myRoot.Position
+				local x, y = off:Dot(right), off:Dot(look)
+				local dist = math.sqrt(x * x + y * y)
+				local px, py = x * pixelsPerStud, -y * pixelsPerStud
+				local beyond = dist > radar.range
+				if beyond then -- pin far-away players to the edge, faded
+					px, py = px * radar.range / dist, py * radar.range / dist
+				end
+				d.Position = UDim2.new(0.5, px, 0.5, py)
+				d.BackgroundTransparency = beyond and 0.65 or 0
+				d.Visible = true
+			else
+				d.Visible = false
+			end
+		end
+	end
+end)
+
+local function setRadar(on)
+	radar.enabled = on
+	radarFrame.Visible = on
 end
 
 -- Freecam (character stays put, camera flies around)
@@ -1290,7 +1642,7 @@ local function teleportToPlayer(plr)
 	local theirRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
 	if myRoot and theirRoot then
 		myRoot.CFrame = CFrame.new(theirRoot.Position + Vector3.new(0, 3, 0))
-		log("Teleported to " .. plr.DisplayName)
+		notify("Teleported to " .. plr.DisplayName)
 	end
 end
 
@@ -1304,7 +1656,7 @@ makeSlider(playerPage, 1, "Walkspeed", 1, 100, 16, function(v)
 	appliedSpeed = v
 	local humanoid = getHumanoid()
 	if humanoid then humanoid.WalkSpeed = v end
-	log("Walkspeed set to " .. v)
+	notify("Walkspeed applied: " .. v)
 end)
 
 makeSlider(playerPage, 2, "Jump Power", 1, 150, 50, function(v)
@@ -1314,7 +1666,7 @@ makeSlider(playerPage, 2, "Jump Power", 1, 150, 50, function(v)
 		humanoid.UseJumpPower = true
 		humanoid.JumpPower = v
 	end
-	log("Jump Power set to " .. v)
+	notify("Jump Power applied: " .. v)
 end)
 
 makeSlider(playerPage, 3, "Gravity", 0, 300, math.round(originalGravity), function(v)
@@ -1325,17 +1677,17 @@ end, true)
 makeCheckbox(playerPage, 4, "Infinite Jump", "Jump again while in mid-air", function(on) infiniteJump = on end)
 makeCheckbox(playerPage, 5, "Noclip", "Walk straight through walls", setNoclip)
 
-local flyModule = makeModule(playerPage, 6, "Fly", "WASD + Space/E up, Ctrl/Q down", setFly)
+local flyModule = makeModule(playerPage, 6, "Fly", "WASD, Space/E up, Ctrl/Q down", setFly)
 makeSlider(flyModule.body, 1, "Fly Speed", 10, 200, 60, function(v) fly.speed = v end, true)
 
-local clickTpModule = makeModule(playerPage, 7, "Click Teleport", "Hold the key, then click to teleport", function(on)
+local clickTpModule = makeModule(playerPage, 7, "Click Teleport", "Hold the key, then click", function(on)
 	clickTp.enabled = on
 end)
 makeKeybind(clickTpModule.body, 1, "Click TP Key", "Hold this while clicking", clickTp.key, function(newKey)
 	clickTp.key = newKey
 end)
 
-local instantModule = makeModule(playerPage, 8, "Instant Interact", "No hold time on prompts, longer reach", setInstantInteract)
+local instantModule = makeModule(playerPage, 8, "Instant Interact", "No hold time, longer reach", setInstantInteract)
 makeSlider(instantModule.body, 1, "Reach Multiplier", 1, 10, 1, function(v)
 	promptRange = v
 	if instantOn then
@@ -1347,7 +1699,7 @@ end, true)
 
 makeCheckbox(playerPage, 9, "Anti-AFK", "Stops the idle kick", function(on) antiAfk = on end)
 
-local playersModule = makeModule(playerPage, 10, "Players", "Teleport to or spectate other players", function() end, false)
+local playersModule = makeModule(playerPage, 10, "Players", "Teleport to or spectate players", function() end, false)
 makeButton(playersModule.body, 1, "Stop Spectating", "Return the camera to yourself", "RESET CAMERA", stopSpectate)
 
 local playerRows = {}
@@ -1405,15 +1757,30 @@ connect(Players.PlayerRemoving, function(plr)
 end)
 
 -- VISUALS tab
+local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
+makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
+makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
+makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
+makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
+makeCheckbox(espModule.body, 5, "Fill", "Semi-transparent fill inside the outline", function(on) espOpts.fill = on end)
+makeCheckbox(espModule.body, 6, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)
 
-makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFullbright)
+local radarModule = makeModule(visualsPage, 2, "Radar", "Minimap of nearby players", setRadar)
+makeSlider(radarModule.body, 1, "Range", 50, 1000, radar.range, function(v) radar.range = v end, true)
+makeSlider(radarModule.body, 2, "Size", 100, 260, radar.size, function(v)
+	radar.size = v
+	radarFrame.Size = UDim2.fromOffset(v, v)
+end, true)
 
-makeSlider(visualsPage, 3, "Field of View", 30, 120, math.round(originalFOV), function(v)
+makeCheckbox(visualsPage, 3, "Fullbright", "Removes darkness and shadows", setFullbright)
+makeButton(visualsPage, 4, "Fog", "Clears the fog from the world", "REMOVE FOG", removeFog)
+
+makeSlider(visualsPage, 5, "Field of View", 30, 120, math.round(originalFOV), function(v)
 	fovChanged = true
 	camera.FieldOfView = v
 end, true)
 
-freecamModule = makeModule(visualsPage, 4, "Freecam", "Right-click + drag to look, your player stays put", setFreecam)
+freecamModule = makeModule(visualsPage, 6, "Freecam", "Right-click + drag to look", setFreecam)
 makeSlider(freecamModule.body, 1, "Freecam Speed", 5, 200, 50, function(v) freecam.speed = v end, true)
 makeCheckbox(freecamModule.body, 2, "Exit After Teleport", "Leave freecam when you teleport to it", function(on)
 	freecam.exitAfterTp = on
@@ -1425,7 +1792,7 @@ freecamGoRow = makeButton(freecamModule.body, 3, "Go to Freecam", "Teleport your
 	if not root then return end
 	root.CFrame = CFrame.new(freecam.pos) * CFrame.Angles(0, freecam.yaw, 0)
 	root.AssemblyLinearVelocity = Vector3.zero
-	log("Teleported to freecam")
+	notify("Teleported to freecam")
 	if freecam.exitAfterTp then freecamModule.set(false) end
 end)
 freecamGoRow.Visible = false
@@ -1527,8 +1894,12 @@ brightnessSet = makeSlider(customizePage, 3, "Brightness", 0, 100, 50, function(
 	applyColor()
 end, true)
 
+makeCheckbox(customizePage, 4, "Notifications", "Pop-ups when you toggle or apply", function(on)
+	notificationsEnabled = on
+end, true, true)
+
 selectTab("PLAYER")
-log("HACK.EXE v1.2 loaded")
+log("HACK.EXE v1.3 loaded")
 log("Press X to hide or show the menu", MUTED)
 
 -- ============================================================
@@ -1607,7 +1978,7 @@ local function unload()
 
 	RunService:UnbindFromRenderStep(MOUSE_STEP)
 
-	-- switch every module off (fly, freecam, noclip, esp, instant interact, ...)
+	-- switch every module off (fly, freecam, noclip, esp, radar, instant interact, ...)
 	for _, off in ipairs(disableCallbacks) do off() end
 	stopSpectate()
 
@@ -1621,9 +1992,21 @@ local function unload()
 	if fovChanged then camera.FieldOfView = originalFOV end
 	if gravityChanged then workspace.Gravity = originalGravity end
 
+	-- put the fog back
+	if fogBackup then
+		Lighting.FogStart = fogBackup.FogStart
+		Lighting.FogEnd = fogBackup.FogEnd
+		local atmosphere = fogBackup.atmosphere
+		if atmosphere and atmosphere.Parent then
+			atmosphere.Density = fogBackup.Density
+			atmosphere.Haze = fogBackup.Haze
+		end
+	end
+
 	for _, c in ipairs(connections) do c:Disconnect() end
 	table.clear(connections)
 
+	notifyGui:Destroy()
 	tracerGui:Destroy()
 	gui:Destroy()
 end
