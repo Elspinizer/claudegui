@@ -1,4 +1,3 @@
--- old script incase new doesnt work
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
@@ -7,22 +6,27 @@ local Lighting = game:GetService("Lighting")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
 
-local MIN_SPEED, MAX_SPEED = 1, 100
 local TOGGLE_KEY = Enum.KeyCode.X
 
-local selectedValue = 16
-local appliedSpeed = nil
-
--- Palette
-local BG = Color3.fromRGB(14, 16, 20)
-local PANEL = Color3.fromRGB(22, 25, 31)
+-- Theme
+local BG = Color3.fromRGB(11, 12, 16)
+local PANEL = Color3.fromRGB(17, 19, 25)
+local ELEMENT = Color3.fromRGB(24, 27, 35)
+local ELEMENT_HOVER = Color3.fromRGB(31, 35, 45)
 local ACCENT = Color3.fromRGB(0, 255, 170)
-local TEXT = Color3.fromRGB(225, 230, 235)
-local MUTED = Color3.fromRGB(120, 128, 140)
+local TEXT = Color3.fromRGB(228, 232, 238)
+local MUTED = Color3.fromRGB(112, 120, 134)
 local DANGER = Color3.fromRGB(255, 85, 100)
 
--- Every connection goes through here so unloading can disconnect them all
+local FONT = Enum.Font.GothamMedium
+local FONT_BOLD = Enum.Font.GothamBold
+local FONT_MONO = Enum.Font.Code
+
+-- ============================================================
+-- Helpers
+-- ============================================================
 local connections = {}
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -37,14 +41,50 @@ local function corner(parent, radius)
 	return c
 end
 
+local function stroke(parent, color, transparency, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Transparency = transparency or 0
+	s.Thickness = thickness or 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function tween(obj, time, props)
+	local t = TweenService:Create(obj, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+	t:Play()
+	return t
+end
+
+local function label(parent, text, size, color, font, xAlign)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Text = text
+	l.TextSize = size
+	l.TextColor3 = color
+	l.Font = font
+	l.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+	l.Parent = parent
+	return l
+end
+
 local function getHumanoid()
 	local character = player.Character
 	return character and character:FindFirstChildOfClass("Humanoid")
 end
 
-local originalSpeed = (getHumanoid() and getHumanoid().WalkSpeed) or 16
+local originalHumanoid = getHumanoid()
+local originalSpeed = originalHumanoid and originalHumanoid.WalkSpeed or 16
+local originalJump = originalHumanoid and originalHumanoid.JumpPower or 50
+local originalFOV = camera.FieldOfView
 
--- ScreenGui
+local appliedSpeed, appliedJump = nil, nil
+local fovChanged = false
+
+-- ============================================================
+-- Window
+-- ============================================================
 local gui = Instance.new("ScreenGui")
 gui.Name = "HackGui"
 gui.ResetOnSpawn = false
@@ -52,267 +92,326 @@ gui.IgnoreGuiInset = true
 gui.DisplayOrder = 100
 gui.Parent = playerGui
 
--- Main window
 local main = Instance.new("Frame")
 main.Name = "Main"
-main.Size = UDim2.fromOffset(320, 330)
+main.Size = UDim2.fromOffset(380, 440)
 main.Position = UDim2.fromScale(0.5, 0.5)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.BackgroundColor3 = BG
 main.BorderSizePixel = 0
 main.Visible = false
 main.Parent = gui
-corner(main, 10)
-
-local stroke = Instance.new("UIStroke")
-stroke.Color = ACCENT
-stroke.Transparency = 0.6
-stroke.Thickness = 1
-stroke.Parent = main
+corner(main, 12)
+stroke(main, ACCENT, 0.7, 1)
 
 local scale = Instance.new("UIScale")
-scale.Scale = 0.9
+scale.Scale = 0.92
 scale.Parent = main
 
--- Title bar (also the drag handle)
+-- Title bar
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 36)
+titleBar.Size = UDim2.new(1, 0, 0, 44)
 titleBar.BackgroundColor3 = PANEL
 titleBar.BorderSizePixel = 0
 titleBar.Parent = main
-corner(titleBar, 10)
+corner(titleBar, 12)
 
-local titleFix = Instance.new("Frame")
-titleFix.Size = UDim2.new(1, 0, 0, 10)
-titleFix.Position = UDim2.new(0, 0, 1, -10)
+local titleFix = Instance.new("Frame") -- squares off the bottom corners
+titleFix.Size = UDim2.new(1, 0, 0, 12)
+titleFix.Position = UDim2.new(0, 0, 1, -12)
 titleFix.BackgroundColor3 = PANEL
 titleFix.BorderSizePixel = 0
 titleFix.Parent = titleBar
 
 local dot = Instance.new("Frame")
 dot.Size = UDim2.fromOffset(8, 8)
-dot.Position = UDim2.new(0, 14, 0.5, -4)
+dot.Position = UDim2.new(0, 18, 0.5, -4)
 dot.BackgroundColor3 = ACCENT
 dot.BorderSizePixel = 0
 dot.Parent = titleBar
 corner(dot, 4)
+stroke(dot, ACCENT, 0.6, 3)
 
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(30, 0)
-title.Size = UDim2.new(1, -70, 1, 0)
-title.Font = Enum.Font.Code
-title.Text = "im claude carried"
-title.TextColor3 = TEXT
-title.TextSize = 14
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = titleBar
+local title = label(titleBar, "HACK.EXE", 14, TEXT, FONT_BOLD)
+title.Position = UDim2.fromOffset(36, 0)
+title.Size = UDim2.new(0, 100, 1, 0)
 
--- Close (unload) button
+local version = label(titleBar, "v1.0", 11, MUTED, FONT_MONO)
+version.Position = UDim2.fromOffset(112, 1)
+version.Size = UDim2.new(0, 50, 1, 0)
+
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(26, 26)
-closeBtn.Position = UDim2.new(1, -32, 0.5, -13)
+closeBtn.Size = UDim2.fromOffset(28, 28)
+closeBtn.Position = UDim2.new(1, -38, 0.5, -14)
+closeBtn.BackgroundColor3 = DANGER
 closeBtn.BackgroundTransparency = 1
 closeBtn.AutoButtonColor = false
-closeBtn.Font = Enum.Font.Code
-closeBtn.Text = "X"
+closeBtn.Font = FONT_BOLD
+closeBtn.Text = "✕"
 closeBtn.TextColor3 = MUTED
-closeBtn.TextSize = 15
+closeBtn.TextSize = 13
 closeBtn.Parent = titleBar
-corner(closeBtn, 6)
+corner(closeBtn, 7)
 
 connect(closeBtn.MouseEnter, function()
-	TweenService:Create(closeBtn, TweenInfo.new(0.12), { TextColor3 = DANGER }):Play()
+	tween(closeBtn, 0.12, { BackgroundTransparency = 0.8, TextColor3 = DANGER })
 end)
 connect(closeBtn.MouseLeave, function()
-	TweenService:Create(closeBtn, TweenInfo.new(0.12), { TextColor3 = MUTED }):Play()
+	tween(closeBtn, 0.12, { BackgroundTransparency = 1, TextColor3 = MUTED })
 end)
 
--- Speed label + value readout
-local label = Instance.new("TextLabel")
-label.BackgroundTransparency = 1
-label.Position = UDim2.fromOffset(20, 50)
-label.Size = UDim2.fromOffset(150, 20)
-label.Font = Enum.Font.Code
-label.Text = "WALKSPEED"
-label.TextColor3 = MUTED
-label.TextSize = 13
-label.TextXAlignment = Enum.TextXAlignment.Left
-label.Parent = main
+-- Tab bar
+local tabBar = Instance.new("Frame")
+tabBar.Position = UDim2.fromOffset(0, 44)
+tabBar.Size = UDim2.new(1, 0, 0, 36)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = main
 
-local valueLabel = Instance.new("TextLabel")
-valueLabel.BackgroundTransparency = 1
-valueLabel.Position = UDim2.new(1, -90, 0, 50)
-valueLabel.Size = UDim2.fromOffset(70, 20)
-valueLabel.Font = Enum.Font.Code
-valueLabel.Text = tostring(selectedValue)
-valueLabel.TextColor3 = ACCENT
-valueLabel.TextSize = 16
-valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-valueLabel.Parent = main
+local tabLine = Instance.new("Frame")
+tabLine.Position = UDim2.new(0, 16, 1, -1)
+tabLine.Size = UDim2.new(1, -32, 0, 1)
+tabLine.BackgroundColor3 = ELEMENT
+tabLine.BorderSizePixel = 0
+tabLine.Parent = tabBar
 
--- Slider
-local track = Instance.new("Frame")
-track.Name = "Track"
-track.Position = UDim2.fromOffset(20, 88)
-track.Size = UDim2.new(1, -40, 0, 6)
-track.BackgroundColor3 = PANEL
-track.BorderSizePixel = 0
-track.Parent = main
-corner(track, 3)
+local tabIndicator = Instance.new("Frame")
+tabIndicator.Size = UDim2.fromOffset(84, 2)
+tabIndicator.Position = UDim2.fromOffset(16, 34)
+tabIndicator.BackgroundColor3 = ACCENT
+tabIndicator.BorderSizePixel = 0
+tabIndicator.Parent = tabBar
+corner(tabIndicator, 1)
 
-local fill = Instance.new("Frame")
-fill.Size = UDim2.fromScale(0, 1)
-fill.BackgroundColor3 = ACCENT
-fill.BorderSizePixel = 0
-fill.Parent = track
-corner(fill, 3)
+-- Content area
+local content = Instance.new("Frame")
+content.Position = UDim2.fromOffset(16, 92)
+content.Size = UDim2.new(1, -32, 0, 310)
+content.BackgroundTransparency = 1
+content.ClipsDescendants = true
+content.Parent = main
 
-local knob = Instance.new("Frame")
-knob.Size = UDim2.fromOffset(16, 16)
-knob.AnchorPoint = Vector2.new(0.5, 0.5)
-knob.Position = UDim2.fromScale(0, 0.5)
-knob.BackgroundColor3 = TEXT
-knob.BorderSizePixel = 0
-knob.ZIndex = 2
-knob.Parent = track
-corner(knob, 8)
+local function makePage()
+	local page = Instance.new("ScrollingFrame")
+	page.Size = UDim2.fromScale(1, 1)
+	page.BackgroundTransparency = 1
+	page.BorderSizePixel = 0
+	page.ScrollBarThickness = 3
+	page.ScrollBarImageColor3 = ACCENT
+	page.ScrollBarImageTransparency = 0.5
+	page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	page.CanvasSize = UDim2.new()
+	page.Visible = false
+	page.Parent = content
 
-local hitbox = Instance.new("TextButton")
-hitbox.BackgroundTransparency = 1
-hitbox.Text = ""
-hitbox.Position = UDim2.fromOffset(20, 76)
-hitbox.Size = UDim2.new(1, -40, 0, 30)
-hitbox.ZIndex = 3
-hitbox.Parent = main
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = page
 
--- Apply button
-local apply = Instance.new("TextButton")
-apply.Position = UDim2.fromOffset(20, 116)
-apply.Size = UDim2.new(1, -40, 0, 32)
-apply.BackgroundColor3 = ACCENT
-apply.AutoButtonColor = false
-apply.Font = Enum.Font.Code
-apply.Text = "APPLY"
-apply.TextColor3 = BG
-apply.TextSize = 15
-apply.Parent = main
-corner(apply, 6)
+	local pad = Instance.new("UIPadding")
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = page
 
--- Divider + modules header
-local divider = Instance.new("Frame")
-divider.Position = UDim2.fromOffset(20, 164)
-divider.Size = UDim2.new(1, -40, 0, 1)
-divider.BackgroundColor3 = PANEL
-divider.BorderSizePixel = 0
-divider.Parent = main
-
-local modulesLabel = Instance.new("TextLabel")
-modulesLabel.BackgroundTransparency = 1
-modulesLabel.Position = UDim2.fromOffset(20, 172)
-modulesLabel.Size = UDim2.fromOffset(150, 18)
-modulesLabel.Font = Enum.Font.Code
-modulesLabel.Text = "MODULES"
-modulesLabel.TextColor3 = MUTED
-modulesLabel.TextSize = 13
-modulesLabel.TextXAlignment = Enum.TextXAlignment.Left
-modulesLabel.Parent = main
-
--- Slider logic
-local function setFromAlpha(alpha)
-	alpha = math.clamp(alpha, 0, 1)
-	selectedValue = math.round(MIN_SPEED + alpha * (MAX_SPEED - MIN_SPEED))
-	local snapped = (selectedValue - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)
-	fill.Size = UDim2.fromScale(snapped, 1)
-	knob.Position = UDim2.fromScale(snapped, 0.5)
-	valueLabel.Text = tostring(selectedValue)
+	return page
 end
 
-local function updateFromX(x)
-	setFromAlpha((x - track.AbsolutePosition.X) / track.AbsoluteSize.X)
+local pages, tabButtons = {}, {}
+local function selectTab(name)
+	for tabName, page in pairs(pages) do
+		page.Visible = (tabName == name)
+		tween(tabButtons[tabName], 0.15, { TextColor3 = tabName == name and TEXT or MUTED })
+	end
+	local btn = tabButtons[name]
+	tween(tabIndicator, 0.2, { Position = UDim2.fromOffset(btn.Position.X.Offset, 34) })
 end
 
-local dragging = false
+local function makeTab(name, index)
+	pages[name] = makePage()
 
-connect(hitbox.InputBegan, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		updateFromX(input.Position.X)
+	local btn = Instance.new("TextButton")
+	btn.Position = UDim2.fromOffset(16 + (index - 1) * 92, 0)
+	btn.Size = UDim2.fromOffset(84, 34)
+	btn.BackgroundTransparency = 1
+	btn.AutoButtonColor = false
+	btn.Font = FONT_BOLD
+	btn.Text = name
+	btn.TextColor3 = MUTED
+	btn.TextSize = 12
+	btn.Parent = tabBar
+	tabButtons[name] = btn
+
+	connect(btn.MouseButton1Click, function() selectTab(name) end)
+	return pages[name]
+end
+
+local playerPage = makeTab("PLAYER", 1)
+local visualsPage = makeTab("VISUALS", 2)
+
+-- Footer
+local footer = label(main, "[X] toggle   •   drag the title bar to move", 11, MUTED, FONT, Enum.TextXAlignment.Center)
+footer.Position = UDim2.new(0, 0, 1, -28)
+footer.Size = UDim2.new(1, 0, 0, 20)
+
+-- ============================================================
+-- REUSABLE COMPONENTS
+-- ============================================================
+
+-- makeSlider(page, order, "Name", min, max, default, callback, live)
+--   live = false -> shows an APPLY button, callback fires when clicked
+--   live = true  -> no button, callback fires as you drag
+local function makeSlider(page, order, name, minV, maxV, default, callback, live)
+	local card = Instance.new("Frame")
+	card.LayoutOrder = order
+	card.Size = UDim2.new(1, 0, 0, live and 66 or 100)
+	card.BackgroundColor3 = ELEMENT
+	card.BorderSizePixel = 0
+	card.Parent = page
+	corner(card, 9)
+
+	local nameLabel = label(card, name, 13, TEXT, FONT)
+	nameLabel.Position = UDim2.fromOffset(14, 10)
+	nameLabel.Size = UDim2.new(0.6, 0, 0, 18)
+
+	local valueLabel = label(card, tostring(default), 15, ACCENT, FONT_MONO, Enum.TextXAlignment.Right)
+	valueLabel.AnchorPoint = Vector2.new(1, 0)
+	valueLabel.Position = UDim2.new(1, -14, 0, 9)
+	valueLabel.Size = UDim2.fromOffset(70, 20)
+
+	local track = Instance.new("Frame")
+	track.Position = UDim2.fromOffset(14, 43)
+	track.Size = UDim2.new(1, -28, 0, 6)
+	track.BackgroundColor3 = BG
+	track.BorderSizePixel = 0
+	track.Parent = card
+	corner(track, 3)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = ACCENT
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	corner(fill, 3)
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.fromOffset(16, 16)
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Position = UDim2.fromScale(0, 0.5)
+	knob.BackgroundColor3 = TEXT
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 2
+	knob.Parent = track
+	corner(knob, 8)
+	local knobStroke = stroke(knob, ACCENT, 1, 4)
+
+	local hitbox = Instance.new("TextButton")
+	hitbox.BackgroundTransparency = 1
+	hitbox.Text = ""
+	hitbox.Position = UDim2.fromOffset(14, 31)
+	hitbox.Size = UDim2.new(1, -28, 0, 30)
+	hitbox.ZIndex = 3
+	hitbox.Parent = card
+
+	local value = default
+	local function setAlpha(alpha, fire)
+		alpha = math.clamp(alpha, 0, 1)
+		value = math.round(minV + alpha * (maxV - minV))
+		local snapped = (value - minV) / (maxV - minV)
+		fill.Size = UDim2.fromScale(snapped, 1)
+		knob.Position = UDim2.fromScale(snapped, 0.5)
+		valueLabel.Text = tostring(value)
+		if live and fire then callback(value) end
 	end
-end)
+	setAlpha((default - minV) / (maxV - minV), false)
 
-connect(UserInputService.InputChanged, function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-		or input.UserInputType == Enum.UserInputType.Touch) then
-		updateFromX(input.Position.X)
+	local dragging = false
+	local function updateFromX(x)
+		setAlpha((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, true)
 	end
-end)
 
-connect(UserInputService.InputEnded, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-
-setFromAlpha((selectedValue - MIN_SPEED) / (MAX_SPEED - MIN_SPEED))
-
--- Apply logic
-connect(apply.MouseEnter, function()
-	TweenService:Create(apply, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(80, 255, 200) }):Play()
-end)
-connect(apply.MouseLeave, function()
-	TweenService:Create(apply, TweenInfo.new(0.15), { BackgroundColor3 = ACCENT }):Play()
-end)
-
-connect(apply.MouseButton1Click, function()
-	appliedSpeed = selectedValue
-	local humanoid = getHumanoid()
-	if humanoid then humanoid.WalkSpeed = appliedSpeed end
-	apply.Text = "APPLIED"
-	task.delay(0.8, function()
-		if apply.Parent then apply.Text = "APPLY" end
+	connect(hitbox.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			tween(knobStroke, 0.12, { Transparency = 0.6 })
+			updateFromX(input.Position.X)
+		end
 	end)
-end)
+	connect(UserInputService.InputChanged, function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			updateFromX(input.Position.X)
+		end
+	end)
+	connect(UserInputService.InputEnded, function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			dragging = false
+			tween(knobStroke, 0.15, { Transparency = 1 })
+		end
+	end)
 
-connect(player.CharacterAdded, function(character)
-	local humanoid = character:WaitForChild("Humanoid")
-	if appliedSpeed then humanoid.WalkSpeed = appliedSpeed end
-end)
+	if not live then
+		local apply = Instance.new("TextButton")
+		apply.Position = UDim2.fromOffset(14, 64)
+		apply.Size = UDim2.new(1, -28, 0, 26)
+		apply.BackgroundColor3 = ACCENT
+		apply.AutoButtonColor = false
+		apply.Font = FONT_BOLD
+		apply.Text = "APPLY"
+		apply.TextColor3 = BG
+		apply.TextSize = 12
+		apply.Parent = card
+		corner(apply, 7)
 
--- ============================================================
--- REUSABLE CHECKBOX
--- makeCheckbox("Label", rowIndex, function(enabled) ... end)
--- Returns a function you can call to set the state in code: setter(true/false)
--- ============================================================
-local CHECKBOX_START_Y = 196
-local CHECKBOX_ROW_HEIGHT = 30
-local disableCallbacks = {} -- used on unload to switch everything off
+		connect(apply.MouseEnter, function()
+			tween(apply, 0.12, { BackgroundColor3 = Color3.fromRGB(90, 255, 205) })
+		end)
+		connect(apply.MouseLeave, function()
+			tween(apply, 0.12, { BackgroundColor3 = ACCENT })
+		end)
+		connect(apply.MouseButton1Click, function()
+			callback(value)
+			apply.Text = "APPLIED ✓"
+			task.delay(0.8, function()
+				if apply.Parent then apply.Text = "APPLY" end
+			end)
+		end)
+	end
+end
 
-local function makeCheckbox(text, rowIndex, callback)
+-- makeCheckbox(page, order, "Name", "description", callback(enabled))
+local disableCallbacks = {}
+
+local function makeCheckbox(page, order, name, desc, callback)
 	local checked = false
 
 	local row = Instance.new("TextButton")
-	row.BackgroundTransparency = 1
+	row.LayoutOrder = order
+	row.Size = UDim2.new(1, 0, 0, 46)
+	row.BackgroundColor3 = ELEMENT
+	row.BorderSizePixel = 0
 	row.AutoButtonColor = false
 	row.Text = ""
-	row.Position = UDim2.fromOffset(20, CHECKBOX_START_Y + (rowIndex - 1) * CHECKBOX_ROW_HEIGHT)
-	row.Size = UDim2.new(1, -40, 0, 26)
-	row.Parent = main
+	row.Parent = page
+	corner(row, 9)
+
+	local nameLabel = label(row, name, 13, TEXT, FONT)
+	nameLabel.Position = UDim2.fromOffset(14, 7)
+	nameLabel.Size = UDim2.new(1, -60, 0, 18)
+
+	local descLabel = label(row, desc, 11, MUTED, FONT)
+	descLabel.Position = UDim2.fromOffset(14, 24)
+	descLabel.Size = UDim2.new(1, -60, 0, 16)
 
 	local box = Instance.new("Frame")
-	box.Size = UDim2.fromOffset(18, 18)
-	box.Position = UDim2.new(0, 0, 0.5, -9)
-	box.BackgroundColor3 = PANEL
+	box.AnchorPoint = Vector2.new(1, 0.5)
+	box.Position = UDim2.new(1, -14, 0.5, 0)
+	box.Size = UDim2.fromOffset(20, 20)
+	box.BackgroundColor3 = BG
 	box.BorderSizePixel = 0
 	box.Parent = row
-	corner(box, 4)
-
-	local boxStroke = Instance.new("UIStroke")
-	boxStroke.Color = MUTED
-	boxStroke.Thickness = 1
-	boxStroke.Parent = box
+	corner(box, 6)
+	local boxStroke = stroke(box, MUTED, 0.2, 1)
 
 	local tick = Instance.new("Frame")
 	tick.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -321,43 +420,42 @@ local function makeCheckbox(text, rowIndex, callback)
 	tick.BackgroundColor3 = ACCENT
 	tick.BorderSizePixel = 0
 	tick.Parent = box
-	corner(tick, 3)
-
-	local text_ = Instance.new("TextLabel")
-	text_.BackgroundTransparency = 1
-	text_.Position = UDim2.fromOffset(28, 0)
-	text_.Size = UDim2.new(1, -28, 1, 0)
-	text_.Font = Enum.Font.Code
-	text_.Text = text
-	text_.TextColor3 = TEXT
-	text_.TextSize = 14
-	text_.TextXAlignment = Enum.TextXAlignment.Left
-	text_.Parent = row
+	corner(tick, 4)
 
 	local function set(value)
 		checked = value
-		TweenService:Create(tick, TweenInfo.new(0.12), {
-			Size = checked and UDim2.fromOffset(10, 10) or UDim2.fromOffset(0, 0),
-		}):Play()
-		TweenService:Create(boxStroke, TweenInfo.new(0.12), {
-			Color = checked and ACCENT or MUTED,
-		}):Play()
+		tween(tick, 0.15, { Size = checked and UDim2.fromOffset(12, 12) or UDim2.fromOffset(0, 0) })
+		tween(boxStroke, 0.15, { Color = checked and ACCENT or MUTED })
 		callback(checked)
 	end
 
+	connect(row.MouseEnter, function() tween(row, 0.12, { BackgroundColor3 = ELEMENT_HOVER }) end)
+	connect(row.MouseLeave, function() tween(row, 0.12, { BackgroundColor3 = ELEMENT }) end)
 	connect(row.MouseButton1Click, function() set(not checked) end)
+
 	table.insert(disableCallbacks, function()
 		if checked then callback(false) end
 	end)
-
-	return set
 end
 
 -- ============================================================
 -- FEATURES
 -- ============================================================
 
--- 1) Infinite Jump
+-- Walkspeed / JumpPower (re-applied after respawn)
+local function applyStats(humanoid)
+	if appliedSpeed then humanoid.WalkSpeed = appliedSpeed end
+	if appliedJump then
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = appliedJump
+	end
+end
+
+connect(player.CharacterAdded, function(character)
+	applyStats(character:WaitForChild("Humanoid"))
+end)
+
+-- Infinite Jump
 local infiniteJump = false
 connect(UserInputService.JumpRequest, function()
 	if infiniteJump then
@@ -366,7 +464,7 @@ connect(UserInputService.JumpRequest, function()
 	end
 end)
 
--- 2) Noclip
+-- Noclip
 local noclip = false
 local noclipTouched = {}
 connect(RunService.Stepped, function()
@@ -390,7 +488,7 @@ local function setNoclip(on)
 	end
 end
 
--- 3) Fullbright
+-- Fullbright
 local originalLighting = {
 	Brightness = Lighting.Brightness,
 	ClockTime = Lighting.ClockTime,
@@ -412,8 +510,7 @@ local function setFullbright(on)
 	end
 end
 
--- 4) Player ESP (game-specific: in a game where everyone is hacking,
---    seeing where everyone is through walls is the most useful edge) Player ESP with names + HP
+-- Player ESP (name, HP, distance)
 local espEnabled = false
 local espObjects = {}
 
@@ -434,11 +531,12 @@ local function addESP(plr)
 	if not character then return end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local head = character:FindFirstChild("Head")
-	if not humanoid or not head then return end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not head or not root then return end
 
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = ACCENT
-	highlight.FillTransparency = 0.75
+	highlight.FillTransparency = 0.8
 	highlight.OutlineColor = ACCENT
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.Parent = character
@@ -446,26 +544,21 @@ local function addESP(plr)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Adornee = head
 	billboard.AlwaysOnTop = true
-	billboard.Size = UDim2.fromOffset(140, 34)
-	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.Size = UDim2.fromOffset(150, 44)
+	billboard.StudsOffset = Vector3.new(0, 2.8, 0)
 	billboard.Parent = head
 
 	local tag = Instance.new("TextLabel")
 	tag.BackgroundTransparency = 1
 	tag.Size = UDim2.fromScale(1, 1)
-	tag.Font = Enum.Font.Code
-	tag.TextSize = 14
+	tag.Font = FONT_MONO
+	tag.TextSize = 13
 	tag.TextColor3 = ACCENT
 	tag.TextStrokeTransparency = 0.5
 	tag.Text = ""
 	tag.Parent = billboard
 
-	espObjects[plr] = {
-		highlight = highlight,
-		billboard = billboard,
-		label = tag,
-		humanoid = humanoid,
-	}
+	espObjects[plr] = { highlight = highlight, billboard = billboard, label = tag, humanoid = humanoid, root = root }
 end
 
 local function hookPlayer(plr)
@@ -480,15 +573,17 @@ for _, plr in ipairs(Players:GetPlayers()) do hookPlayer(plr) end
 connect(Players.PlayerAdded, hookPlayer)
 connect(Players.PlayerRemoving, removeESP)
 
--- Keeps the name/HP text up to date (colour fades from red to green with health)
 connect(RunService.Heartbeat, function()
 	if not espEnabled then return end
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	for plr, data in pairs(espObjects) do
 		local hum = data.humanoid
 		if hum and hum.Parent then
 			local hp = math.max(0, math.floor(hum.Health + 0.5))
 			local ratio = hum.MaxHealth > 0 and math.clamp(hum.Health / hum.MaxHealth, 0, 1) or 0
-			data.label.Text = plr.DisplayName .. "\n" .. hp .. " HP"
+			local dist = (myRoot and data.root.Parent) and math.floor((myRoot.Position - data.root.Position).Magnitude) or 0
+			data.label.Text = plr.DisplayName .. "\n" .. hp .. " HP  •  " .. dist .. "m"
 			data.label.TextColor3 = DANGER:Lerp(ACCENT, ratio)
 		end
 	end
@@ -500,11 +595,39 @@ local function setESP(on)
 		if on then addESP(plr) else removeESP(plr) end
 	end
 end
--- Add the checkboxes (row number, then what happens)
-makeCheckbox("Infinite Jump", 1, function(on) infiniteJump = on end)
-makeCheckbox("Noclip", 2, setNoclip)
-makeCheckbox("Fullbright", 3, setFullbright)
-makeCheckbox("Player ESP", 4, setESP)
+
+-- ============================================================
+-- BUILD THE MENU (add your own features here)
+-- ============================================================
+
+-- PLAYER tab
+makeSlider(playerPage, 1, "Walkspeed", 1, 100, 16, function(v)
+	appliedSpeed = v
+	local humanoid = getHumanoid()
+	if humanoid then humanoid.WalkSpeed = v end
+end)
+
+makeSlider(playerPage, 2, "Jump Power", 1, 150, 50, function(v)
+	appliedJump = v
+	local humanoid = getHumanoid()
+	if humanoid then
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = v
+	end
+end)
+
+makeCheckbox(playerPage, 3, "Infinite Jump", "Jump again while in mid-air", function(on) infiniteJump = on end)
+makeCheckbox(playerPage, 4, "Noclip", "Walk straight through walls", setNoclip)
+
+-- VISUALS tab
+makeCheckbox(visualsPage, 1, "Player ESP", "Names, HP and distance through walls", setESP)
+makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFullbright)
+makeSlider(visualsPage, 3, "Field of View", 30, 120, math.round(originalFOV), function(v)
+	fovChanged = true
+	camera.FieldOfView = v
+end, true)
+
+selectTab("PLAYER")
 
 -- ============================================================
 -- Draggable window
@@ -549,33 +672,34 @@ connect(UserInputService.InputBegan, function(input)
 	open = not open
 	if open then
 		main.Visible = true
-		TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		tween(scale, 0.2, { Scale = 1 })
 	else
-		local tween = TweenService:Create(scale, TweenInfo.new(0.15), { Scale = 0.9 })
-		tween:Play()
-		tween.Completed:Once(function()
+		local t = tween(scale, 0.15, { Scale = 0.92 })
+		t.Completed:Once(function()
 			if not open then main.Visible = false end
 		end)
 	end
 end)
 
 -- ============================================================
--- Unload (the X button in the corner)
+-- Unload
 -- ============================================================
 local unloaded = false
 local function unload()
 	if unloaded then return end
 	unloaded = true
 
-	-- switch every module off so nothing is left behind
 	for _, off in ipairs(disableCallbacks) do off() end
 
-	-- restore walkspeed
 	local humanoid = getHumanoid()
-	if humanoid and appliedSpeed then humanoid.WalkSpeed = originalSpeed end
-	appliedSpeed = nil
+	if humanoid then
+		if appliedSpeed then humanoid.WalkSpeed = originalSpeed end
+		if appliedJump then humanoid.JumpPower = originalJump end
+	end
+	appliedSpeed, appliedJump = nil, nil
 
-	-- disconnect everything (this is what stops the X key from toggling)
+	if fovChanged then camera.FieldOfView = originalFOV end
+
 	for _, c in ipairs(connections) do c:Disconnect() end
 	table.clear(connections)
 
