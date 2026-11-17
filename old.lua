@@ -3,6 +3,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
+local ContextActionService = game:GetService("ContextActionService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -10,7 +11,7 @@ local camera = workspace.CurrentCamera
 
 local TOGGLE_KEY = Enum.KeyCode.X
 
--- Theme
+-- Theme (ACCENT changes when the user picks a colour)
 local BG = Color3.fromRGB(11, 12, 16)
 local PANEL = Color3.fromRGB(17, 19, 25)
 local ELEMENT = Color3.fromRGB(24, 27, 35)
@@ -32,6 +33,17 @@ local function connect(signal, fn)
 	local c = signal:Connect(fn)
 	table.insert(connections, c)
 	return c
+end
+
+-- Accent colour system: anything that uses the accent registers here
+local accentUpdaters = {}
+local function onAccent(fn)
+	fn(ACCENT)
+	table.insert(accentUpdaters, fn)
+end
+local function setAccent(color)
+	ACCENT = color
+	for _, fn in ipairs(accentUpdaters) do fn(color) end
 end
 
 local function corner(parent, radius)
@@ -74,6 +86,10 @@ local function getHumanoid()
 	return character and character:FindFirstChildOfClass("Humanoid")
 end
 
+local function keyDown(k)
+	return UserInputService:IsKeyDown(k)
+end
+
 local originalHumanoid = getHumanoid()
 local originalSpeed = originalHumanoid and originalHumanoid.WalkSpeed or 16
 local originalJump = originalHumanoid and originalHumanoid.JumpPower or 50
@@ -102,7 +118,8 @@ main.BorderSizePixel = 0
 main.Visible = false
 main.Parent = gui
 corner(main, 12)
-stroke(main, ACCENT, 0.7, 1)
+local mainStroke = stroke(main, ACCENT, 0.7, 1)
+onAccent(function(c) mainStroke.Color = c end)
 
 local scale = Instance.new("UIScale")
 scale.Scale = 0.92
@@ -116,7 +133,7 @@ titleBar.BorderSizePixel = 0
 titleBar.Parent = main
 corner(titleBar, 12)
 
-local titleFix = Instance.new("Frame") -- squares off the bottom corners
+local titleFix = Instance.new("Frame")
 titleFix.Size = UDim2.new(1, 0, 0, 12)
 titleFix.Position = UDim2.new(0, 0, 1, -12)
 titleFix.BackgroundColor3 = PANEL
@@ -130,13 +147,17 @@ dot.BackgroundColor3 = ACCENT
 dot.BorderSizePixel = 0
 dot.Parent = titleBar
 corner(dot, 4)
-stroke(dot, ACCENT, 0.6, 3)
+local dotStroke = stroke(dot, ACCENT, 0.6, 3)
+onAccent(function(c)
+	dot.BackgroundColor3 = c
+	dotStroke.Color = c
+end)
 
-local title = label(titleBar, "HACK.EXE", 14, TEXT, FONT_BOLD)
+local title = label(titleBar, ".✓.", 14, TEXT, FONT_BOLD)
 title.Position = UDim2.fromOffset(36, 0)
 title.Size = UDim2.new(0, 100, 1, 0)
 
-local version = label(titleBar, "v1.0", 11, MUTED, FONT_MONO)
+local version = label(titleBar, "v1.1", 11, MUTED, FONT_MONO)
 version.Position = UDim2.fromOffset(112, 1)
 version.Size = UDim2.new(0, 50, 1, 0)
 
@@ -181,6 +202,7 @@ tabIndicator.BackgroundColor3 = ACCENT
 tabIndicator.BorderSizePixel = 0
 tabIndicator.Parent = tabBar
 corner(tabIndicator, 1)
+onAccent(function(c) tabIndicator.BackgroundColor3 = c end)
 
 -- Content area
 local content = Instance.new("Frame")
@@ -202,6 +224,7 @@ local function makePage()
 	page.CanvasSize = UDim2.new()
 	page.Visible = false
 	page.Parent = content
+	onAccent(function(c) page.ScrollBarImageColor3 = c end)
 
 	local layout = Instance.new("UIListLayout")
 	layout.Padding = UDim.new(0, 8)
@@ -246,6 +269,7 @@ end
 
 local playerPage = makeTab("PLAYER", 1)
 local visualsPage = makeTab("VISUALS", 2)
+local customizePage = makeTab("CUSTOMIZE", 3)
 
 -- Footer
 local footer = label(main, "[X] toggle   •   drag the title bar to move", 11, MUTED, FONT, Enum.TextXAlignment.Center)
@@ -259,6 +283,7 @@ footer.Size = UDim2.new(1, 0, 0, 20)
 -- makeSlider(page, order, "Name", min, max, default, callback, live)
 --   live = false -> shows an APPLY button, callback fires when clicked
 --   live = true  -> no button, callback fires as you drag
+-- Returns a function you can call to move the slider from code: setter(value)
 local function makeSlider(page, order, name, minV, maxV, default, callback, live)
 	local card = Instance.new("Frame")
 	card.LayoutOrder = order
@@ -302,6 +327,12 @@ local function makeSlider(page, order, name, minV, maxV, default, callback, live
 	knob.Parent = track
 	corner(knob, 8)
 	local knobStroke = stroke(knob, ACCENT, 1, 4)
+
+	onAccent(function(c)
+		valueLabel.TextColor3 = c
+		fill.BackgroundColor3 = c
+		knobStroke.Color = c
+	end)
 
 	local hitbox = Instance.new("TextButton")
 	hitbox.BackgroundTransparency = 1
@@ -362,9 +393,10 @@ local function makeSlider(page, order, name, minV, maxV, default, callback, live
 		apply.TextSize = 12
 		apply.Parent = card
 		corner(apply, 7)
+		onAccent(function(c) apply.BackgroundColor3 = c end)
 
 		connect(apply.MouseEnter, function()
-			tween(apply, 0.12, { BackgroundColor3 = Color3.fromRGB(90, 255, 205) })
+			tween(apply, 0.12, { BackgroundColor3 = ACCENT:Lerp(Color3.new(1, 1, 1), 0.3) })
 		end)
 		connect(apply.MouseLeave, function()
 			tween(apply, 0.12, { BackgroundColor3 = ACCENT })
@@ -376,6 +408,10 @@ local function makeSlider(page, order, name, minV, maxV, default, callback, live
 				if apply.Parent then apply.Text = "APPLY" end
 			end)
 		end)
+	end
+
+	return function(v)
+		setAlpha((v - minV) / (maxV - minV), false)
 	end
 end
 
@@ -422,6 +458,11 @@ local function makeCheckbox(page, order, name, desc, callback)
 	tick.Parent = box
 	corner(tick, 4)
 
+	onAccent(function(c)
+		tick.BackgroundColor3 = c
+		if checked then boxStroke.Color = c end
+	end)
+
 	local function set(value)
 		checked = value
 		tween(tick, 0.15, { Size = checked and UDim2.fromOffset(12, 12) or UDim2.fromOffset(0, 0) })
@@ -435,6 +476,73 @@ local function makeCheckbox(page, order, name, desc, callback)
 
 	table.insert(disableCallbacks, function()
 		if checked then callback(false) end
+	end)
+end
+
+-- makeKeybind(page, order, "Name", "description", Enum.KeyCode.T, function(newKey) end)
+-- Click the button, then press any key to bind it (Escape cancels)
+local listeningForKey = false
+
+local function makeKeybind(page, order, name, desc, default, onChange)
+	local key = default
+	local waiting = false
+
+	local row = Instance.new("Frame")
+	row.LayoutOrder = order
+	row.Size = UDim2.new(1, 0, 0, 46)
+	row.BackgroundColor3 = ELEMENT
+	row.BorderSizePixel = 0
+	row.Parent = page
+	corner(row, 9)
+
+	local nameLabel = label(row, name, 13, TEXT, FONT)
+	nameLabel.Position = UDim2.fromOffset(14, 7)
+	nameLabel.Size = UDim2.new(1, -120, 0, 18)
+
+	local descLabel = label(row, desc, 11, MUTED, FONT)
+	descLabel.Position = UDim2.fromOffset(14, 24)
+	descLabel.Size = UDim2.new(1, -120, 0, 16)
+
+	local btn = Instance.new("TextButton")
+	btn.AnchorPoint = Vector2.new(1, 0.5)
+	btn.Position = UDim2.new(1, -12, 0.5, 0)
+	btn.Size = UDim2.fromOffset(92, 26)
+	btn.BackgroundColor3 = BG
+	btn.AutoButtonColor = false
+	btn.Font = FONT_MONO
+	btn.Text = key.Name
+	btn.TextColor3 = TEXT
+	btn.TextSize = 12
+	btn.Parent = row
+	corner(btn, 7)
+	local btnStroke = stroke(btn, MUTED, 0.2, 1)
+
+	local function finish()
+		waiting = false
+		btn.Text = key.Name
+		btn.TextColor3 = TEXT
+		btnStroke.Color = MUTED
+		task.defer(function() listeningForKey = false end) -- after every other handler has seen this key press
+	end
+
+	connect(btn.MouseButton1Click, function()
+		if listeningForKey then return end
+		waiting = true
+		listeningForKey = true
+		btn.Text = "press a key..."
+		btn.TextColor3 = ACCENT
+		btnStroke.Color = ACCENT
+	end)
+
+	connect(UserInputService.InputBegan, function(input)
+		if not waiting then return end
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		if input.KeyCode == Enum.KeyCode.Unknown then return end
+		if input.KeyCode ~= Enum.KeyCode.Escape then
+			key = input.KeyCode
+			onChange(key)
+		end
+		finish()
 	end)
 end
 
@@ -573,6 +681,13 @@ for _, plr in ipairs(Players:GetPlayers()) do hookPlayer(plr) end
 connect(Players.PlayerAdded, hookPlayer)
 connect(Players.PlayerRemoving, removeESP)
 
+onAccent(function(c)
+	for _, data in pairs(espObjects) do
+		data.highlight.FillColor = c
+		data.highlight.OutlineColor = c
+	end
+end)
+
 connect(RunService.Heartbeat, function()
 	if not espEnabled then return end
 	local myChar = player.Character
@@ -596,6 +711,196 @@ local function setESP(on)
 	end
 end
 
+-- Freecam (character stays put, camera flies around)
+-- Right-click + drag to look, WASD to move, Space/E up, Ctrl/Q down, Shift = faster
+local freecam = { enabled = false, looking = false, yaw = 0, pitch = 0, pos = Vector3.zero, speed = 50 }
+local FREECAM_SINK = "HackGuiFreecamSink"
+
+local function setFreecam(on)
+	camera = workspace.CurrentCamera
+	freecam.enabled = on
+	if on then
+		local cf = camera.CFrame
+		freecam.pos = cf.Position
+		freecam.pitch, freecam.yaw = cf:ToOrientation()
+		camera.CameraType = Enum.CameraType.Scriptable
+
+		-- swallow movement keys so the character doesn't walk around while you look around
+		ContextActionService:BindActionAtPriority(
+			FREECAM_SINK,
+			function() return Enum.ContextActionResult.Sink end,
+			false,
+			Enum.ContextActionPriority.High.Value,
+			Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D,
+			Enum.KeyCode.Space, Enum.KeyCode.Q, Enum.KeyCode.E,
+			Enum.KeyCode.LeftControl, Enum.KeyCode.LeftShift,
+			Enum.KeyCode.Thumbstick1
+		)
+	else
+		ContextActionService:UnbindAction(FREECAM_SINK)
+		freecam.looking = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		camera.CameraType = Enum.CameraType.Custom
+	end
+end
+
+connect(UserInputService.InputBegan, function(input, gameProcessed)
+	if freecam.enabled and not gameProcessed and input.UserInputType == Enum.UserInputType.MouseButton2 then
+		freecam.looking = true
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+	end
+end)
+connect(UserInputService.InputEnded, function(input)
+	if freecam.looking and input.UserInputType == Enum.UserInputType.MouseButton2 then
+		freecam.looking = false
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	end
+end)
+connect(UserInputService.InputChanged, function(input)
+	if freecam.enabled and freecam.looking and input.UserInputType == Enum.UserInputType.MouseMovement then
+		freecam.yaw -= input.Delta.X * 0.003
+		freecam.pitch = math.clamp(freecam.pitch - input.Delta.Y * 0.003, math.rad(-85), math.rad(85))
+	end
+end)
+
+-- Fly
+-- WASD moves relative to where the camera looks, Space/E up, Ctrl/Q down
+local fly = { enabled = false, speed = 60, lv = nil, ao = nil, att = nil }
+
+local function destroyFly()
+	for _, k in ipairs({ "lv", "ao", "att" }) do
+		if fly[k] then
+			fly[k]:Destroy()
+			fly[k] = nil
+		end
+	end
+	local humanoid = getHumanoid()
+	if humanoid then humanoid.PlatformStand = false end
+end
+
+local function buildFly()
+	destroyFly()
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = getHumanoid()
+	if not root or not humanoid then return end
+
+	local att = Instance.new("Attachment")
+	att.Name = "HackGuiFlyAttachment"
+	att.Parent = root
+
+	local lv = Instance.new("LinearVelocity")
+	lv.Attachment0 = att
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
+	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lv.MaxForce = math.huge
+	lv.VectorVelocity = Vector3.zero
+	lv.Parent = root
+
+	local ao = Instance.new("AlignOrientation")
+	ao.Attachment0 = att
+	ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	ao.RigidityEnabled = true
+	ao.CFrame = root.CFrame.Rotation
+	ao.Parent = root
+
+	humanoid.PlatformStand = true
+	fly.att, fly.lv, fly.ao = att, lv, ao
+end
+
+local function setFly(on)
+	fly.enabled = on
+	if on then buildFly() else destroyFly() end
+end
+
+-- Click Teleport: tick it on, bind a key, then hold that key and left-click anywhere
+local clickTp = { enabled = false, key = Enum.KeyCode.T }
+
+connect(UserInputService.InputBegan, function(input)
+	if listeningForKey or not clickTp.enabled then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+	if not keyDown(clickTp.key) then return end
+
+	local mouse = UserInputService:GetMouseLocation()
+
+	-- ignore clicks that land on the menu itself
+	if main.Visible then
+		local p, s = main.AbsolutePosition, main.AbsoluteSize
+		if mouse.X >= p.X and mouse.X <= p.X + s.X and mouse.Y >= p.Y and mouse.Y <= p.Y + s.Y then
+			return
+		end
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+
+	local cam = workspace.CurrentCamera
+	local ray = cam:ViewportPointToRay(mouse.X, mouse.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 3000, params)
+	if result then
+		root.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0)) * root.CFrame.Rotation
+	end
+end)
+
+-- Per-frame loop for freecam + fly
+connect(RunService.RenderStepped, function(dt)
+	camera = workspace.CurrentCamera
+	local typing = UserInputService:GetFocusedTextBox() ~= nil
+
+	local function axis(pos, neg)
+		return (keyDown(pos) and 1 or 0) - (keyDown(neg) and 1 or 0)
+	end
+	local upHeld = keyDown(Enum.KeyCode.Space) or keyDown(Enum.KeyCode.E)
+	local downHeld = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.Q)
+	local vertical = (upHeld and 1 or 0) - (downHeld and 1 or 0)
+
+	if freecam.enabled then
+		if camera.CameraType ~= Enum.CameraType.Scriptable then
+			camera.CameraType = Enum.CameraType.Scriptable
+		end
+		local rot = CFrame.fromOrientation(freecam.pitch, freecam.yaw, 0)
+		local move = Vector3.zero
+		if not typing then
+			local localMove = Vector3.new(axis(Enum.KeyCode.D, Enum.KeyCode.A), 0, axis(Enum.KeyCode.S, Enum.KeyCode.W))
+			move = rot:VectorToWorldSpace(localMove) + Vector3.new(0, vertical, 0)
+		end
+		if move.Magnitude > 0 then move = move.Unit end
+		local boost = keyDown(Enum.KeyCode.LeftShift) and 3 or 1
+		freecam.pos += move * freecam.speed * boost * dt
+		camera.CFrame = CFrame.new(freecam.pos) * rot
+	end
+
+	if fly.enabled then
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = getHumanoid()
+		if root and humanoid and humanoid.Health > 0 then
+			if not fly.lv or not fly.lv.Parent then buildFly() end
+			if fly.lv then
+				local dir = Vector3.zero
+				if not typing and not freecam.enabled then
+					local cf = camera.CFrame
+					dir = cf.LookVector * axis(Enum.KeyCode.W, Enum.KeyCode.S)
+						+ cf.RightVector * axis(Enum.KeyCode.D, Enum.KeyCode.A)
+						+ Vector3.new(0, vertical, 0)
+					if dir.Magnitude > 0 then dir = dir.Unit end
+
+					local flat = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+					if flat.Magnitude > 0.05 then
+						fly.ao.CFrame = CFrame.lookAt(Vector3.zero, flat)
+					end
+				end
+				fly.lv.VectorVelocity = dir * fly.speed
+			end
+		end
+	end
+end)
+
 -- ============================================================
 -- BUILD THE MENU (add your own features here)
 -- ============================================================
@@ -618,6 +923,10 @@ end)
 
 makeCheckbox(playerPage, 3, "Infinite Jump", "Jump again while in mid-air", function(on) infiniteJump = on end)
 makeCheckbox(playerPage, 4, "Noclip", "Walk straight through walls", setNoclip)
+makeCheckbox(playerPage, 5, "Fly", "WASD + Space/E up, Ctrl/Q down", setFly)
+makeSlider(playerPage, 6, "Fly Speed", 10, 200, 60, function(v) fly.speed = v end, true)
+makeCheckbox(playerPage, 7, "Click Teleport", "Hold the key, then click to teleport", function(on) clickTp.enabled = on end)
+makeKeybind(playerPage, 8, "Click TP Key", "Hold this while clicking", clickTp.key, function(newKey) clickTp.key = newKey end)
 
 -- VISUALS tab
 makeCheckbox(visualsPage, 1, "Player ESP", "Names, HP and distance through walls", setESP)
@@ -625,6 +934,77 @@ makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFu
 makeSlider(visualsPage, 3, "Field of View", 30, 120, math.round(originalFOV), function(v)
 	fovChanged = true
 	camera.FieldOfView = v
+end, true)
+makeCheckbox(visualsPage, 4, "Freecam", "Right-click + drag to look, your player stays put", setFreecam)
+makeSlider(visualsPage, 5, "Freecam Speed", 5, 200, 50, function(v) freecam.speed = v end, true)
+
+-- CUSTOMIZE tab
+local swatchColors = {
+	Color3.fromRGB(0, 255, 170),   -- mint (default)
+	Color3.fromRGB(0, 200, 255),   -- cyan
+	Color3.fromRGB(80, 120, 255),  -- blue
+	Color3.fromRGB(170, 100, 255), -- purple
+	Color3.fromRGB(255, 90, 190),  -- pink
+	Color3.fromRGB(255, 85, 100),  -- red
+	Color3.fromRGB(255, 150, 50),  -- orange
+	Color3.fromRGB(255, 220, 60),  -- yellow
+}
+
+local swatchCard = Instance.new("Frame")
+swatchCard.LayoutOrder = 1
+swatchCard.Size = UDim2.new(1, 0, 0, 84)
+swatchCard.BackgroundColor3 = ELEMENT
+swatchCard.BorderSizePixel = 0
+swatchCard.Parent = customizePage
+corner(swatchCard, 9)
+
+local swatchTitle = label(swatchCard, "Accent Colour", 13, TEXT, FONT)
+swatchTitle.Position = UDim2.fromOffset(14, 10)
+swatchTitle.Size = UDim2.new(1, -28, 0, 18)
+
+local swatchRow = Instance.new("Frame")
+swatchRow.BackgroundTransparency = 1
+swatchRow.Position = UDim2.fromOffset(14, 40)
+swatchRow.Size = UDim2.new(1, -28, 0, 28)
+swatchRow.Parent = swatchCard
+
+local swatchLayout = Instance.new("UIListLayout")
+swatchLayout.FillDirection = Enum.FillDirection.Horizontal
+swatchLayout.Padding = UDim.new(0, 12)
+swatchLayout.SortOrder = Enum.SortOrder.LayoutOrder
+swatchLayout.Parent = swatchRow
+
+local swatches = {}
+local hueSet -- assigned below once the hue slider exists
+
+local function selectSwatch(index)
+	for i, s in ipairs(swatches) do
+		tween(s.ring, 0.12, { Transparency = (i == index) and 0 or 1 })
+	end
+end
+
+for i, color in ipairs(swatchColors) do
+	local btn = Instance.new("TextButton")
+	btn.LayoutOrder = i
+	btn.Size = UDim2.fromOffset(28, 28)
+	btn.BackgroundColor3 = color
+	btn.AutoButtonColor = false
+	btn.Text = ""
+	btn.Parent = swatchRow
+	corner(btn, 14)
+	local ring = stroke(btn, TEXT, (i == 1) and 0 or 1, 2)
+	swatches[i] = { button = btn, ring = ring }
+
+	connect(btn.MouseButton1Click, function()
+		setAccent(color)
+		selectSwatch(i)
+		if hueSet then hueSet(math.round((color:ToHSV()) * 360)) end
+	end)
+end
+
+hueSet = makeSlider(customizePage, 2, "Custom Hue", 0, 360, math.round((ACCENT:ToHSV()) * 360), function(v)
+	setAccent(Color3.fromHSV(v / 360, 1, 1))
+	selectSwatch(0)
 end, true)
 
 selectTab("PLAYER")
@@ -667,6 +1047,7 @@ local open = false
 
 connect(UserInputService.InputBegan, function(input)
 	if input.KeyCode ~= TOGGLE_KEY then return end
+	if listeningForKey then return end -- don't toggle while binding a key
 	if UserInputService:GetFocusedTextBox() then return end
 
 	open = not open
@@ -689,6 +1070,7 @@ local function unload()
 	if unloaded then return end
 	unloaded = true
 
+	-- switch every module off (fly, freecam, noclip, esp, ...)
 	for _, off in ipairs(disableCallbacks) do off() end
 
 	local humanoid = getHumanoid()
