@@ -918,10 +918,11 @@ local function setFullbright(on)
 	end
 end
 
--- Player ESP (options: names, HP, distance, outline, tracers)
+-- Player ESP (options: names, HP, distance, outline, fill, tracers)
 local espEnabled = false
-local espOpts = { names = true, health = true, distance = true, outline = true, tracers = false }
+local espOpts = { names = true, health = true, distance = true, outline = true, fill = false, tracers = false }
 local espObjects = {}
+local ESP_FILL_TRANSPARENCY = 0.5 -- the outline is fully solid, the fill is a bit see-through
 
 local function removeESP(plr)
 	local data = espObjects[plr]
@@ -946,10 +947,11 @@ local function addESP(plr)
 
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = ACCENT
-	highlight.FillTransparency = 0.8
+	highlight.FillTransparency = espOpts.fill and ESP_FILL_TRANSPARENCY or 1
 	highlight.OutlineColor = ACCENT
+	highlight.OutlineTransparency = espOpts.outline and 0 or 1
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Enabled = espOpts.outline
+	highlight.Enabled = espOpts.outline or espOpts.fill
 	highlight.Parent = character
 
 	local billboard = Instance.new("BillboardGui")
@@ -1027,7 +1029,11 @@ connect(RunService.RenderStepped, function()
 
 			local ratio = hum.MaxHealth > 0 and math.clamp(hum.Health / hum.MaxHealth, 0, 1) or 0
 			data.label.TextColor3 = DANGER:Lerp(ACCENT, ratio)
-			data.highlight.Enabled = espOpts.outline
+
+			-- outline + fill
+			data.highlight.OutlineTransparency = espOpts.outline and 0 or 1
+			data.highlight.FillTransparency = espOpts.fill and ESP_FILL_TRANSPARENCY or 1
+			data.highlight.Enabled = espOpts.outline or espOpts.fill
 
 			-- tracer
 			local screen, onScreen = camera:WorldToViewportPoint(data.root.Position)
@@ -1046,6 +1052,20 @@ connect(RunService.RenderStepped, function()
 end)
 
 local function setESP(on)
+	espEnabled = on
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if on then addESP(plr) else removeESP(plr) end
+	end
+end
+
+-- ESP dropdown (the menu part)
+local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
+makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
+makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
+makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
+makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
+makeCheckbox(espModule.body, 5, "Fill", "Semi-transparent fill inside the outline", function(on) espOpts.fill = on end)
+makeCheckbox(espModule.body, 6, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)local function setESP(on)
 	espEnabled = on
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if on then addESP(plr) else removeESP(plr) end
@@ -1385,6 +1405,12 @@ connect(Players.PlayerRemoving, function(plr)
 end)
 
 -- VISUALS tab
+local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
+makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
+makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
+makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
+makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
+makeCheckbox(espModule.body, 5, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)
 
 makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFullbright)
 
@@ -1409,6 +1435,7 @@ freecamGoRow = makeButton(freecamModule.body, 3, "Go to Freecam", "Teleport your
 	if freecam.exitAfterTp then freecamModule.set(false) end
 end)
 freecamGoRow.Visible = false
+
 -- CUSTOMIZE tab
 local swatchColors = {
 	Color3.fromRGB(0, 255, 170),   -- mint (default)
@@ -1611,4 +1638,3 @@ closeBtn.MouseButton1Click:Connect(unload)
 
 -- Open the menu automatically when the script starts
 setOpen(true)
-
