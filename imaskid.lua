@@ -1405,12 +1405,6 @@ connect(Players.PlayerRemoving, function(plr)
 end)
 
 -- VISUALS tab
-local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
-makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
-makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
-makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
-makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
-makeCheckbox(espModule.body, 5, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)
 
 makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFullbright)
 
