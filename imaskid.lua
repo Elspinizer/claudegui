@@ -1385,12 +1385,6 @@ connect(Players.PlayerRemoving, function(plr)
 end)
 
 -- VISUALS tab
-local espModule = makeModule(visualsPage, 1, "Player ESP", "Highlights players through walls", setESP)
-makeCheckbox(espModule.body, 1, "Names", "Show display names", function(on) espOpts.names = on end, true)
-makeCheckbox(espModule.body, 2, "Health", "Show HP", function(on) espOpts.health = on end, true)
-makeCheckbox(espModule.body, 3, "Distance", "Show distance in studs", function(on) espOpts.distance = on end, true)
-makeCheckbox(espModule.body, 4, "Outline", "Glowing player outline", function(on) espOpts.outline = on end, true)
-makeCheckbox(espModule.body, 5, "Tracers", "Lines from the bottom of the screen", function(on) espOpts.tracers = on end)
 
 makeCheckbox(visualsPage, 2, "Fullbright", "Removes darkness and shadows", setFullbright)
 
@@ -1415,7 +1409,6 @@ freecamGoRow = makeButton(freecamModule.body, 3, "Go to Freecam", "Teleport your
 	if freecam.exitAfterTp then freecamModule.set(false) end
 end)
 freecamGoRow.Visible = false
-
 -- CUSTOMIZE tab
 local swatchColors = {
 	Color3.fromRGB(0, 255, 170),   -- mint (default)
@@ -1427,6 +1420,24 @@ local swatchColors = {
 	Color3.fromRGB(255, 150, 50),  -- orange
 	Color3.fromRGB(255, 220, 60),  -- yellow
 }
+
+-- The accent is built from a hue, a saturation and a brightness slider:
+--   brightness 0   = black
+--   brightness 50  = the plain colour
+--   brightness 100 = white
+local h0, s0 = ACCENT:ToHSV()
+local colorState = { h = h0, s = s0, bright = 50 }
+
+local function applyColor()
+	local b = colorState.bright
+	local color
+	if b <= 50 then
+		color = Color3.fromHSV(colorState.h, colorState.s, b / 50)
+	else
+		color = Color3.fromHSV(colorState.h, colorState.s * (1 - (b - 50) / 50), 1)
+	end
+	setAccent(color)
+end
 
 local swatchCard = Instance.new("Frame")
 swatchCard.LayoutOrder = 1
@@ -1453,7 +1464,7 @@ swatchLayout.SortOrder = Enum.SortOrder.LayoutOrder
 swatchLayout.Parent = swatchRow
 
 local swatches = {}
-local hueSet -- assigned below once the hue slider exists
+local hueSet, brightnessSet -- assigned below once the sliders exist
 
 local function selectSwatch(index)
 	for i, s in ipairs(swatches) do
@@ -1474,15 +1485,25 @@ for i, color in ipairs(swatchColors) do
 	swatches[i] = { button = btn, ring = ring }
 
 	connect(btn.MouseButton1Click, function()
-		setAccent(color)
+		local h, s = color:ToHSV()
+		colorState.h, colorState.s, colorState.bright = h, s, 50 -- picking a swatch shows its exact colour
+		applyColor()
 		selectSwatch(i)
-		if hueSet then hueSet(math.round((color:ToHSV()) * 360)) end
+		if hueSet then hueSet(math.round(h * 360)) end
+		if brightnessSet then brightnessSet(50) end
 	end)
 end
 
-hueSet = makeSlider(customizePage, 2, "Custom Hue", 0, 360, math.round((ACCENT:ToHSV()) * 360), function(v)
-	setAccent(Color3.fromHSV(v / 360, 1, 1))
+hueSet = makeSlider(customizePage, 2, "Custom Hue", 0, 360, math.round(h0 * 360), function(v)
+	colorState.h = v / 360
+	colorState.s = 1
+	applyColor()
 	selectSwatch(0)
+end, true)
+
+brightnessSet = makeSlider(customizePage, 3, "Brightness", 0, 100, 50, function(v)
+	colorState.bright = v
+	applyColor()
 end, true)
 
 selectTab("PLAYER")
