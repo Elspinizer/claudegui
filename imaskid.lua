@@ -153,7 +153,7 @@ onAccent(function(c)
 	dotStroke.Color = c
 end)
 
-local title = label(titleBar, "HACK.EXE", 14, TEXT, FONT_BOLD)
+local title = label(titleBar, ".✓.", 14, TEXT, FONT_BOLD)
 title.Position = UDim2.fromOffset(36, 0)
 title.Size = UDim2.new(0, 100, 1, 0)
 
